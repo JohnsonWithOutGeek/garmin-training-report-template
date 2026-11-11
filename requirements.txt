@@ -1,0 +1,2 @@
+requests>=2.32,<3
+fitdecode>=0.10,<0.11
