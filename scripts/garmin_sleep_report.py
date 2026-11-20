@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import sys\nsys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))\n\nimport garmin_report as daily
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+import garmin_report as daily
 
 TIMEZONE = os.getenv("TIMEZONE", "Asia/Shanghai")
 REPORT_DIR = Path("reports")
