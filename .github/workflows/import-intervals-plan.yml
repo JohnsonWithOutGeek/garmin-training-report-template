@@ -36,4 +36,5 @@ jobs:
         env:
           INTERVALS_API_KEY: ${{ secrets.INTERVALS_API_KEY }}
           CONFIRM_IMPORT: ${{ inputs.confirm_import }}
-        run: python src/intervals_training_plan.py import --plan "${{ inputs.plan_file }}"
+          PLAN_FILE: ${{ inputs.plan_file }}
+        run: python src/intervals_training_plan.py import --plan "$PLAN_FILE"
