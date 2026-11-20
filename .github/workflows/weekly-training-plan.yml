@@ -1,0 +1,54 @@
+name: Intervals.icu Weekly Training Plan Draft
+
+on:
+  # 暂停自动触发；保留 workflow_dispatch，之后仍可手动运行
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: intervals-weekly-plan-draft
+  cancel-in-progress: false
+
+jobs:
+  create-draft:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Generate next week's draft (does not write to calendar)
+        env:
+          INTERVALS_API_KEY: ${{ secrets.INTERVALS_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          LLM_BASE_URL: https://api.deepseek.com
+          LLM_MODEL: deepseek-flash
+          TIMEZONE: ${{ vars.TIMEZONE || 'Asia/Shanghai' }}
+          FTP_WATTS: ${{ vars.FTP_WATTS || '250' }}
+        run: python src/intervals_training_plan.py draft
+      - name: Commit draft and open review issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plans/drafts/
+          if git diff --cached --quiet; then
+            echo "No new draft to commit."
+            exit 0
+          fi
+          git commit -m "Create weekly Intervals.icu training plan draft"
+          git push
+          PLAN_JSON=$(ls -t plans/drafts/next-week-*.json | head -n 1)
+          PLAN_MD="${PLAN_JSON%.json}.md"
+          WEEK=$(basename "$PLAN_JSON" .json | sed 's/next-week-//')
+          gh issue create --title "审核下周骑行训练计划：$WEEK" --body "已生成草案，尚未写入 Intervals.icu。请查看 [$PLAN_MD]($PLAN_MD) 和 [$PLAN_JSON]($PLAN_JSON)。审核通过后，在 Actions 运行 Intervals.icu Import Approved Plan，填写 JSON 路径并勾选 confirm_import。"
