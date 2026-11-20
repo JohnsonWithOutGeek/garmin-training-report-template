@@ -1,108 +1,101 @@
-# Garmin Training Report
+# Garmin Training Report Template
 
-A self-hosted Garmin Connect Personal API report generator. It runs on GitHub Actions, fetches your previous day's activities, downloads FIT files, analyzes power intervals, and publishes Markdown and JSON reports into your own repository.
+A self-hosted Garmin Connect Personal API reporting project. GitHub Actions can fetch activity and sleep data, analyze FIT files, and publish Markdown/JSON reports. Optional Intervals.icu integration creates reviewed weekly training-plan drafts and can import an explicitly approved plan into your calendar.
 
-> **Privacy first:** reports contain personal health and activity data. Keep your generated-report repository private. This template intentionally excludes personal reports and credentials.
+> **Privacy first:** this is a public template repository. Do not add personal API keys here or run it as your personal report repository. Use **Use this template → Create a new repository**, choose **Private**, and configure secrets in that private copy. Generated activity and sleep reports contain personal data.
 
-## Features
+## Automation features
 
-- Daily scheduled run with GitHub Actions.
-- Garmin Connect Personal API authentication using a repository secret.
-- Previous-day activity summaries and activity details.
-- FIT-file power analysis: power-zone time, sustained work intervals, interval averages, first-half/second-half changes, and comparisons between repetitions in the same zone.
-- Markdown and JSON output in `reports/`.
-- Manual run for a selected report date.
+| Workflow | Trigger | Result |
+|---|---|---|
+| Garmin Daily Training Report | Daily at 00:00 UTC; manual date selection | Daily Markdown/JSON report with FIT power-interval and elevation/climb analysis |
+| Garmin Weekly Training Report | Monday at 00:00 UTC; optional Monday date | Previous complete Monday–Sunday report |
+| Garmin Latest Sleep Data | Manual; optional sleep date | Sleep Markdown/JSON report |
+| Intervals.icu Weekly Training Plan Draft | Manual | Creates a draft under plans/drafts/ and opens a review Issue; does not modify the calendar |
+| Intervals.icu Import Approved Plan | Manual, with explicit confirmation | Imports the selected reviewed JSON plan and verifies calendar entries |
 
-## Create your own repository
+The daily and weekly schedules are expressed in UTC. 00:00 UTC is 08:00 in China Standard Time.
 
-1. Open the source template repository on GitHub.
-2. Click **Use this template → Create a new repository**.
-3. Choose your own account or organization and a repository name.
-4. For privacy, choose **Private**.
-5. Create the repository. Your copy is independent; later changes to the source repository are not automatically applied.
+## Create your private report repository
 
-If you cannot see **Use this template**, the source repository owner may need to grant you at least **Read** access. A private template is not publicly discoverable and cannot be used by people who do not have access to it.
+1. Select **Use this template → Create a new repository**.
+2. Create the new repository under your account or organization.
+3. Set its visibility to **Private**.
+4. Configure the secrets and variables below in that private copy.
+5. Enable Actions write permissions if you want workflows to commit generated reports.
 
-## Configure your repository
+Do not configure personal credentials or generate reports in this public template repository.
 
-### 1. Add your Garmin API key
+## Configure GitHub Actions
 
-In your new repository, go to **Settings → Secrets and variables → Actions → New repository secret**.
+Open **Settings → Secrets and variables → Actions** in your private copy.
 
-Create this secret:
+### Required secrets
 
-- Name: `GARMIN_API_KEY`
-- Secret: your own Garmin Connect Personal API key
+| Secret | Used by | Purpose |
+|---|---|---|
+| GARMIN_API_KEY | Daily, weekly, and sleep reports | Garmin Connect Personal API key |
+| INTERVALS_API_KEY | Weekly training-plan draft and import | Intervals.icu API key |
+| DEEPSEEK_API_KEY | Weekly training-plan draft | DeepSeek API key for generating the plan |
 
-Do not paste the key into source code, workflow files, issues, or chat messages. Do not use another person's key. This project does not need your Garmin password or a manually copied access token.
+Garmin and Intervals.icu secrets are only needed if you use those workflows. DEEPSEEK_API_KEY is only needed for the AI-generated plan draft. Never commit keys or tokens to source files, reports, Issues, or chat messages.
 
-### 2. Set your personal training configuration
+### Optional repository variables
 
-Go to **Settings → Secrets and variables → Actions → Variables → New repository variable** and optionally create:
-
-| Variable | Example | Purpose |
+| Variable | Default | Purpose |
 |---|---:|---|
-| `FTP_WATTS` | `250` | Your current FTP in watts; default is 250 |
-| `TIMEZONE` | `Asia/Shanghai` | IANA timezone used to determine the previous calendar day and format local timestamps |
+| FTP_WATTS | 250 | FTP in watts used for power zones, IF/TSS estimates, and training-plan context |
+| TIMEZONE | Asia/Shanghai | IANA timezone used for report dates and local timestamps |
 
-Use your own FTP value. The default is only a placeholder, not a recommended training value. Common timezone examples include `Asia/Shanghai`, `America/Los_Angeles`, and `Europe/London`.
+Set FTP_WATTS to your own current value. The default of 250 W is a template placeholder, not a training recommendation.
 
-The scheduled workflow runs at **00:00 UTC**. With `TIMEZONE=Asia/Shanghai`, this is 08:00 China Standard Time. If you want the workflow to run at a different local time, edit the `cron` expression in `.github/workflows/daily-report.yml` (GitHub Actions cron is in UTC).
+### Enable workflow write permissions
 
-### 3. Enable Actions write access
+For workflows that commit reports or drafts, go to **Settings → Actions → General → Workflow permissions** and enable **Read and write permissions** for GITHUB_TOKEN.
 
-The workflow commits generated reports back to your repository. In **Settings → Actions → General → Workflow permissions**, allow **Read and write permissions** for `GITHUB_TOKEN`.
+The report workflows request contents: write; the weekly-plan draft workflow also requests issues: write to open a review Issue. The calendar-import workflow only needs repository read access; the Intervals.icu API key authorizes the external calendar write.
 
-The workflow itself requests only `contents: write`.
+## Run the workflows
 
-## Run your first report
+- **Daily report:** Actions → Garmin Daily Training Report → Run workflow. Leave report_date empty to report yesterday, or enter YYYY-MM-DD.
+- **Weekly report:** Actions → Garmin Weekly Training Report → Run workflow. Leave week_start empty for the previous complete week, or provide a Monday date in YYYY-MM-DD format.
+- **Sleep report:** Actions → Garmin Latest Sleep Data → Run workflow. Leave sleep_date empty to use the latest available record, or enter YYYY-MM-DD.
+- **Training-plan draft:** run Intervals.icu Weekly Training Plan Draft, then review the generated Markdown/JSON under plans/drafts/ and the review Issue.
+- **Calendar import:** only after reviewing the plan, run Intervals.icu Import Approved Plan, enter the JSON path, and check confirm_import.
 
-1. Open **Actions → Garmin Daily Training Report**.
-2. Select **Run workflow**.
-3. Leave `report_date` empty to fetch yesterday in your configured timezone, or enter a date as `YYYY-MM-DD`.
-4. Open the run and inspect the logs.
-5. When successful, find `reports/YYYY-MM-DD.md` and `reports/YYYY-MM-DD.json`.
-
-The first scheduled run occurs at the next configured cron time. Manual runs are useful for validating your API key and configuration first.
+Draft generation never writes to the Intervals.icu calendar. Import is a separate, manually triggered workflow with an explicit confirmation checkbox.
 
 ## Output and metric notes
 
-- `reports/YYYY-MM-DD.md`: readable daily summary and power-interval analysis.
-- `reports/YYYY-MM-DD.json`: structured activity and analysis data.
-- Power zones are calculated from the configured FTP.
-- Sustained work intervals require at least 120 seconds of qualifying samples. Power is smoothed with a trailing 5-second mean for zone classification.
-- TSS is an estimate derived from normalized power, duration, and configured FTP. It is not Garmin's official Training Load.
-- Some activities may not provide power data or a downloadable FIT file; those activities will still appear with a note that interval analysis is unavailable.
-- Averages across activities are arithmetic means of activity-level averages, not duration-weighted session averages.
-
-## Troubleshooting
-
-| Symptom | Check |
-|---|---|
-| `Missing GARMIN_API_KEY` | Add the repository secret with the exact name `GARMIN_API_KEY`. |
-| Garmin token request fails | Confirm your Personal API access/key is valid and has not been revoked. |
-| HTTP 401 | The generated access token was rejected; verify the key and Garmin API access. |
-| HTTP 429 | Garmin rate limiting; wait and retry later. |
-| No report commit appears | Check whether the report files changed and whether Actions has read/write repository permission. |
-| FIT analysis unavailable | The activity may not expose a FIT download or usable power records. The summary report can still be generated. |
+- Daily reports contain activity summaries, FIT-derived power intervals, and elevation/climb analysis when FIT data is available.
+- Weekly reports aggregate activities, distance, duration, elevation, estimated TSS, power-zone time, and recognized work intervals.
+- TSS is an estimate based on normalized power, duration, and configured FTP; it is not Garmin's official Training Load.
+- FIT analysis may be unavailable for activities without downloadable FIT data or usable power records.
+- Sleep reports preserve the Garmin API response alongside a readable Markdown summary.
+- Personal reports are ignored by Git by default; report workflows explicitly force-add generated output in your private repository.
 
 ## Project layout
 
-```text
-.
-├── .github/workflows/daily-report.yml
-├── reports/                 # Generated personal reports (ignored by Git)
-├── src/garmin_report.py
-├── .gitignore
-└── requirements.txt
-```
+    .github/workflows/
+      daily-report.yml
+      weekly-report.yml
+      sleep-report.yml
+      weekly-training-plan.yml
+      import-intervals-plan.yml
+    src/
+      garmin_report.py
+      garmin_weekly_report.py
+      intervals_training_plan.py
+    scripts/
+      garmin_sleep_report.py
+    plans/drafts/       Generated training-plan drafts
+    reports/            Generated personal reports
+    requirements.txt
 
 ## References
 
-- [Garmin Personal API](https://developer.garmin.com/gc-developer-program/personal/personal-api/)
-- [Personal API FAQ](https://developer.garmin.com/gc-developer-program/personal/personal-faq)
-- [Personal API Swagger](https://developer.garmin.com/gc-developer-program/personal/swagger-docs/)
+- Garmin Connect Personal API: https://developer.garmin.com/gc-developer-program/personal/personal-api/
+- Intervals.icu API: https://intervals.icu/api-docs.html
+- DeepSeek API: https://api-docs.deepseek.com/
 
-## License and use
-
-Check Garmin's current Personal API terms and eligibility requirements before using this project. This repository is provided as a starting point; you are responsible for your own API access, credentials, data handling, and training settings.
+Check each provider's current terms and API requirements before use. You are responsible for your API access, credentials, privacy settings, and training configuration.
