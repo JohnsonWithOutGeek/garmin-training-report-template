@@ -1,0 +1,60 @@
+name: Garmin Weekly Training Report
+
+on:
+  push:
+    paths:
+      - '.github/workflows/weekly-report.run-now'
+  # Monday 00:00 UTC = Monday 08:00 Asia/Shanghai.
+  # At that time the previous Monday-Sunday week is complete.
+  schedule:
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+    inputs:
+      week_start:
+        description: "Optional Monday date (YYYY-MM-DD); leave blank for the previous complete week"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: garmin-weekly-report
+  cancel-in-progress: false
+
+jobs:
+  weekly-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch previous week's Garmin activities and build report
+        env:
+          GARMIN_API_KEY: ${{ secrets.GARMIN_API_KEY }}
+          TIMEZONE: ${{ vars.TIMEZONE || 'Asia/Shanghai' }}
+          FTP_WATTS: ${{ vars.FTP_WATTS || '250' }}
+          REPORT_WEEK_START: ${{ inputs.week_start || '' }}
+        run: python src/garmin_weekly_report.py
+
+      - name: Commit weekly report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f reports/weekly-*.json reports/weekly-*.md
+          if git diff --cached --quiet; then
+            echo "No weekly report changes to commit."
+          else
+            git commit -m "Add Garmin weekly training report"
+            git push
+          fi
