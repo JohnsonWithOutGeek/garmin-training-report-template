@@ -156,6 +156,107 @@ def extract_fit_bytes(download: bytes) -> bytes:
         raise GarminApiError("Downloaded activity file is neither ZIP nor FIT")
 
 
+def extract_fit_elevation(fit_bytes: bytes) -> list[dict[str, Any]]:
+    """Return the complete timestamp/distance/elevation record stream from a FIT file."""
+    profile = []
+    with fitdecode.FitReader(io.BytesIO(fit_bytes)) as fit:
+        for frame in fit:
+            if getattr(frame, "name", None) != "record" or not hasattr(frame, "fields"):
+                continue
+            fields = {field.name: field.value for field in frame.fields}
+            timestamp = fields.get("timestamp")
+            distance = number(fields.get("distance"))
+            altitude = number(fields.get("enhanced_altitude"))
+            if altitude is None:
+                altitude = number(fields.get("altitude"))
+            if timestamp is None or distance is None or altitude is None:
+                continue
+            profile.append({
+                "timestamp": timestamp.isoformat(),
+                "elapsed_seconds": round((timestamp - profile_start).total_seconds(), 1) if profile else 0.0,
+                "distance_m": round(distance, 1),
+                "altitude_m": round(altitude, 1),
+            })
+            if len(profile) == 1:
+                profile_start = timestamp
+    return profile
+
+
+def analyze_climbs(profile: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Detect meaningful valley-to-summit climbs from smoothed FIT elevation."""
+    if len(profile) < 60:
+        return []
+    # Centered 31-record moving average suppresses short GPS/barometric noise.
+    altitudes = [float(p["altitude_m"]) for p in profile]
+    smooth = []
+    radius = 15
+    for i in range(len(altitudes)):
+        lo, hi = max(0, i - radius), min(len(altitudes), i + radius + 1)
+        smooth.append(sum(altitudes[lo:hi]) / (hi - lo))
+
+    # Zig-zag turning points: ignore reversals smaller than 12 m.
+    threshold = 12.0
+    low_i = high_i = 0
+    low_v = high_v = smooth[0]
+    trend = 0
+    turns = []
+    for i, value in enumerate(smooth):
+        if value < low_v:
+            low_v, low_i = value, i
+        if value > high_v:
+            high_v, high_i = value, i
+        if trend == 0:
+            if value - low_v >= threshold:
+                turns.append(("low", low_i))
+                trend = 1
+                high_v, high_i = value, i
+            elif high_v - value >= threshold:
+                turns.append(("high", high_i))
+                trend = -1
+                low_v, low_i = value, i
+        elif trend == 1:
+            if value > high_v:
+                high_v, high_i = value, i
+            elif high_v - value >= threshold:
+                turns.append(("high", high_i))
+                trend = -1
+                low_v, low_i = value, i
+        else:
+            if value < low_v:
+                low_v, low_i = value, i
+            elif value - low_v >= threshold:
+                turns.append(("low", low_i))
+                trend = 1
+                high_v, high_i = value, i
+
+    if trend == 1:
+        turns.append(("high", high_i))
+    elif trend == -1:
+        turns.append(("low", low_i))
+
+    climbs = []
+    for j in range(len(turns) - 1):
+        kind_a, ia = turns[j]
+        kind_b, ib = turns[j + 1]
+        if kind_a != "low" or kind_b != "high" or ib <= ia:
+            continue
+        start, end = profile[ia], profile[ib]
+        distance = float(end["distance_m"]) - float(start["distance_m"])
+        gain = smooth[ib] - smooth[ia]
+        if distance < 300 or gain < 30:
+            continue
+        climbs.append({
+            "start_time": start["timestamp"],
+            "end_time": end["timestamp"],
+            "start_distance_km": round(float(start["distance_m"]) / 1000, 2),
+            "end_distance_km": round(float(end["distance_m"]) / 1000, 2),
+            "distance_km": round(distance / 1000, 2),
+            "elevation_gain_m": round(gain, 1),
+            "average_grade_pct": round(gain / distance * 100, 2),
+        })
+    return sorted(climbs, key=lambda x: x["average_grade_pct"], reverse=True)
+
+
 def analyze_fit_power(fit_bytes: bytes) -> dict[str, Any]:
     samples = []
     with fitdecode.FitReader(io.BytesIO(fit_bytes)) as fit:
@@ -379,7 +480,13 @@ def build_report(day: date, activities: list[dict[str, Any]]) -> dict[str, Any]:
         activity = normalize_activity(item, detail)
         try:
             fit_data = CLIENT.download_activity(activity_id)
-            activity["power_interval_analysis"] = analyze_fit_power(extract_fit_bytes(fit_data))
+            fit_bytes = extract_fit_bytes(fit_data)
+            activity["power_interval_analysis"] = analyze_fit_power(fit_bytes)
+            activity["elevation_profile"] = extract_fit_elevation(fit_bytes)
+            activity["climb_analysis"] = analyze_climbs(activity["elevation_profile"])
+            print(f"Extracted {len(activity['elevation_profile'])} elevation samples for {activity_id}")
+            for climb in activity["climb_analysis"][:10]:
+                print("CLIMB " + json.dumps(climb, ensure_ascii=False))
         except Exception as exc:
             print(f"Warning: FIT analysis unavailable for {activity_id}: {exc}", file=sys.stderr)
             activity["power_interval_analysis"] = {"available": False, "reason": str(exc)[:300]}
@@ -532,3 +639,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# Manual workflow trigger: generate the requested 2026-11-18 Garmin report.
