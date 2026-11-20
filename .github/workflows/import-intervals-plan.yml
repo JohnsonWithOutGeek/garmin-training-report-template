@@ -1,0 +1,39 @@
+name: Intervals.icu Import Approved Plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      plan_file:
+        description: "Reviewed plan JSON path"
+        required: true
+        type: string
+      confirm_import:
+        description: "Check only after reviewing the plan"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: intervals-calendar-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    if: ${{ inputs.confirm_import == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Import and verify approved plan
+        env:
+          INTERVALS_API_KEY: ${{ secrets.INTERVALS_API_KEY }}
+          CONFIRM_IMPORT: ${{ inputs.confirm_import }}
+        run: python src/intervals_training_plan.py import --plan "${{ inputs.plan_file }}"
