@@ -1,0 +1,55 @@
+name: Garmin Latest Sleep Data
+
+on:
+  push:
+    paths:
+      - '.github/workflows/sleep-report.run-now'
+  workflow_dispatch:
+    inputs:
+      sleep_date:
+        description: "Optional Garmin sleep date (YYYY-MM-DD); defaults to the latest available date"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: garmin-sleep-report
+  cancel-in-progress: false
+
+jobs:
+  sleep-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch latest Garmin sleep data
+        env:
+          GARMIN_API_KEY: ${{ secrets.GARMIN_API_KEY }}
+          TIMEZONE: ${{ vars.TIMEZONE || 'Asia/Shanghai' }}
+          SLEEP_DATE: ${{ inputs.sleep_date || '' }}
+        run: python scripts/garmin_sleep_report.py
+
+      - name: Commit sleep report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f reports/sleep-*.json reports/sleep-*.md
+          if git diff --cached --quiet; then
+            echo "No sleep report changes to commit."
+          else
+            git commit -m "Add latest Garmin sleep data"
+            git push
+          fi
